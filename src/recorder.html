@@ -249,7 +249,8 @@ function renderJobs(jobs) {
     const cls = j.status === "done" ? "done" : j.status === "failed" ? "failed" : "working";
     const label = j.status === "done" ? "done" : j.status === "failed" ? "failed" : j.status + "…";
     const title = j.github_url ? `<a href="${j.github_url}" target="_blank">${esc(j.title)}</a>` : esc(j.title);
-    const retry = j.status === "failed" ? ` <button class="btn-ghost" onclick="retryJob('${j.id}')">retry</button>` : "";
+    const stale = !["done", "failed"].includes(j.status) && (Date.now() - Date.parse(j.updated_at || j.created_at)) > 10 * 60e3;
+    const retry = (j.status === "failed" || stale) ? ` <button class="btn-ghost" onclick="retryJob('${j.id}')">retry</button>` : "";
     const err = j.status === "failed" && j.error ? `<div class="d">${esc(j.error.slice(0, 120))}</div>` : "";
     return `<div class="job"><div class="t">${title}<div class="d">${new Date(j.created_at).toLocaleString()}</div>${err}</div><span class="chip ${cls}">${label}</span>${retry}</div>`;
   }).join("");
