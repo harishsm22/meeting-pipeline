@@ -17,6 +17,7 @@ export default {
       if (request.method === "POST" && path === "/upload") return await handleUpload(request, env);
       if (request.method === "POST" && path === "/webhook/elevenlabs") return await handleWebhook(request, env, ctx);
       if (request.method === "GET" && path === "/jobs") return await listJobs(request, env);
+      if (request.method === "GET" && path === "/calendar") return await handleCalendar(request, env);
       if (request.method === "POST" && path === "/retry") return await handleRetry(request, env, ctx);
       return json({ error: "not found" }, 404);
     } catch (e) {
@@ -310,6 +311,116 @@ async function handleRetry(request, env, ctx) {
   if (err) { job.status = "failed"; job.error = err; await saveJob(env, job); return json({ error: err }, 502); }
   await saveJob(env, job);
   return json({ ok: true, resumed_from: "audio" });
+}
+
+// ---------- Google Calendar (secret iCal feed) ----------
+
+// Returns events from 4h ago to 14h ahead so you can pick the meeting
+// before it starts or right after it ends.
+async function handleCalendar(request, env) {
+  if (!authorized(request, env)) return json({ error: "unauthorized" }, 401);
+  if (!env.GCAL_ICS_URL) return json({ enabled: false, events: [] });
+
+  const r = await fetch(env.GCAL_ICS_URL, { cf: { cacheTtl: 300 } });
+  if (!r.ok) return json({ error: `calendar fetch failed (${r.status})` }, 502);
+
+  const all = parseICS(await r.text());
+  const from = Date.now() - 4 * 3600e3;
+  const to = Date.now() + 14 * 3600e3;
+
+  const events = [];
+  for (const e of all) {
+    const start = nextOccurrence(e, from, to);
+    if (!start) continue;
+    events.push({
+      title: e.summary || "Untitled event",
+      start: new Date(start).toISOString(),
+      attendees: e.attendees.join(", "),
+    });
+  }
+  events.sort((a, b) => a.start.localeCompare(b.start));
+  return json({ enabled: true, events: events.slice(0, 25) });
+}
+
+function parseICS(ics) {
+  // Unfold continuation lines, then walk VEVENT blocks
+  const lines = ics.replace(/\r?\n[ \t]/g, "").split(/\r?\n/);
+  const events = [];
+  let cur = null;
+  for (const line of lines) {
+    if (line === "BEGIN:VEVENT") { cur = { attendees: [], rrule: null }; continue; }
+    if (line === "END:VEVENT") { if (cur && cur.start && cur.status !== "CANCELLED") events.push(cur); cur = null; continue; }
+    if (!cur) continue;
+    const idx = line.indexOf(":");
+    if (idx < 0) continue;
+    const left = line.slice(0, idx), value = line.slice(idx + 1);
+    const [prop, ...paramParts] = left.split(";");
+    const params = Object.fromEntries(paramParts.map(p => { const i = p.indexOf("="); return [p.slice(0, i), p.slice(i + 1)]; }));
+    if (prop === "SUMMARY") cur.summary = value.replace(/\\,/g, ",").replace(/\\n/g, " ");
+    else if (prop === "DTSTART") cur.start = parseIcsDate(value, params.TZID);
+    else if (prop === "RRULE") cur.rrule = value;
+    else if (prop === "STATUS") cur.status = value;
+    else if (prop === "ATTENDEE" || prop === "ORGANIZER") {
+      const email = value.replace(/^mailto:/i, "").trim();
+      const name = (params.CN || "").replace(/^"|"$/g, "");
+      if (email.includes("@") && cur.attendees.length < 50) {
+        cur.attendees.push(name && !name.includes("@") ? `${name} <${email}>` : email);
+      }
+    }
+  }
+  return events;
+}
+
+function parseIcsDate(val, tzid) {
+  const m = val.match(/^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})?(Z)?)?/);
+  if (!m) return null;
+  const [, y, mo, d, h = "0", mi = "0", s = "0", z] = m;
+  const utcGuess = Date.UTC(+y, +mo - 1, +d, +h, +mi, +s);
+  if (z || !tzid) return utcGuess;
+  return utcGuess - tzOffsetMs(new Date(utcGuess), tzid);
+}
+
+function tzOffsetMs(date, tz) {
+  try {
+    const f = new Intl.DateTimeFormat("en-US", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+    const p = Object.fromEntries(f.formatToParts(date).map(x => [x.type, x.value]));
+    return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour % 24, +p.minute, +p.second) - date.getTime();
+  } catch { return 0; }
+}
+
+// Handles one-off events plus simple DAILY/WEEKLY recurrences (covers
+// standups and weekly syncs). Returns the occurrence time within the
+// window, or null.
+function nextOccurrence(e, from, to) {
+  if (e.start >= from && e.start <= to) return e.start;
+  if (!e.rrule || e.start > to) return null;
+  const rules = Object.fromEntries(e.rrule.split(";").map(p => p.split("=")));
+  const freq = rules.FREQ;
+  const interval = (parseInt(rules.INTERVAL) || 1);
+  const until = rules.UNTIL ? parseIcsDate(rules.UNTIL, null) : null;
+  let stepMs;
+  if (freq === "DAILY") stepMs = interval * 86400e3;
+  else if (freq === "WEEKLY") stepMs = interval * 7 * 86400e3;
+  else return null;
+  // Jump close to the window, then walk
+  let t = e.start + Math.max(0, Math.floor((from - e.start) / stepMs)) * stepMs;
+  for (let i = 0; i < 400 && t <= to; i++) {
+    if (t >= from && (!until || t <= until)) {
+      if (freq === "WEEKLY" && rules.BYDAY) {
+        // For multi-day rules (e.g. MO,WE,FR), check day matches
+        const days = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
+        const wanted = rules.BYDAY.split(",");
+        for (let d = 0; d < 7; d++) {
+          const cand = t + d * 86400e3;
+          if (cand >= from && cand <= to && wanted.includes(days[new Date(cand).getUTCDay()]) && (!until || cand <= until)) return cand;
+        }
+      } else {
+        return t;
+      }
+    }
+    t += stepMs;
+  }
+  return null;
 }
 
 // ---------- helpers ----------

@@ -3,7 +3,7 @@
 Record meetings on your phone or laptop → ElevenLabs transcribes with speaker detection → Claude names the speakers, cleans the transcript, and writes a summary with action items → the finished notes are committed to the `meeting-notes` GitHub repo.
 
 ```
-Phone / laptop recorder (web page)
+Phone / laptop recorder (web page) ◄── Google Calendar (picks event, fills attendees)
         │  audio + title + attendees
         ▼
 Cloudflare Worker  ──►  R2 storage (audio kept as backup)
@@ -50,7 +50,17 @@ You need four things: a Cloudflare account, an ElevenLabs API key, an Anthropic 
 3. Auth method: HMAC. Copy the signing secret it gives you, and add it in Cloudflare as another secret named `ELEVENLABS_WEBHOOK_SECRET`.
 4. Make sure the webhook is enabled for **Speech to Text** events.
 
-### 4. Use it
+### 4. (Optional) Link Google Calendar
+
+This lets the recorder show today's meetings in a dropdown — picking one auto-fills the title and attendees.
+
+1. Open [Google Calendar settings](https://calendar.google.com/calendar/r/settings) on a computer → click your calendar under **Settings for my calendars** → scroll to **Integrate calendar**.
+2. Copy the **Secret address in iCal format** (a long `.ics` URL). Treat it like a password — anyone with it can read your calendar.
+3. In Cloudflare, add it as a secret named `GCAL_ICS_URL`.
+
+The dropdown shows events from 4 hours ago to 14 hours ahead. Recurring meetings (daily/weekly) are supported.
+
+### 5. Use it
 
 - Open your worker URL on your phone → enter your `APP_SECRET` once → Share button → **Add to Home Screen**. Now it behaves like an app.
 - Tap record at the start of a meeting. **Keep the page open** — the page keeps your screen awake while recording (iPhone web apps can't record with the screen locked).
@@ -67,4 +77,4 @@ You need four things: a Cloudflare account, an ElevenLabs API key, an Anthropic 
 
 - iPhone web recording pauses if the screen locks or you switch apps for a long time. The page holds a screen wake-lock to prevent auto-lock; for true background recording a native TestFlight app is the v2 path.
 - Uploads are limited to ~100 MB (Cloudflare free plan) ≈ 3 hours of audio at the recorder's bitrate.
-- The transcript quality of speaker *identification* improves a lot when you fill in the attendees field.
+- The transcript quality of speaker *identification* improves a lot when you fill in the attendees field — linking a calendar event does this automatically.

@@ -15,7 +15,8 @@
   .sub { color: #94a3b8; font-size: 13px; margin-bottom: 20px; }
   .card { background: #1e293b; border-radius: 14px; padding: 16px; margin-bottom: 14px; }
   label { display: block; font-size: 12px; color: #94a3b8; margin: 10px 0 4px; }
-  input[type=text], input[type=password] { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; font-size: 15px; }
+  input[type=text], input[type=password], select { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; font-size: 15px; }
+  select { appearance: none; margin-bottom: 10px; }
   button { border: 0; border-radius: 10px; padding: 12px 16px; font-size: 15px; font-weight: 600; cursor: pointer; }
   .btn-rec { width: 100%; padding: 18px; font-size: 17px; background: #dc2626; color: #fff; }
   .btn-rec.recording { background: #475569; }
@@ -53,6 +54,10 @@
 
   <!-- Recorder -->
   <div class="card hidden" id="recorder">
+    <div class="hidden" id="calWrap">
+      <label>Calendar event (auto-fills title &amp; attendees)</label>
+      <select id="calEvent" onchange="calChanged()"><option value="">— not linked —</option></select>
+    </div>
     <div class="timer" id="timer">00:00</div>
     <div class="hint" id="recHint">Keep this page open while recording</div>
     <button class="btn-rec" id="recBtn" onclick="toggleRecord()">● Start recording</button>
@@ -88,9 +93,34 @@ let recordedBlob = null, recordedAt = null, pickedFile = null;
 const $ = id => document.getElementById(id);
 const secret = () => localStorage.getItem("app_secret") || "";
 
+let calEvents = [];
+
 function init() {
-  if (secret()) { $("setup").classList.add("hidden"); $("recorder").classList.remove("hidden"); $("jobsCard").classList.remove("hidden"); refreshJobs(); }
+  if (secret()) { $("setup").classList.add("hidden"); $("recorder").classList.remove("hidden"); $("jobsCard").classList.remove("hidden"); refreshJobs(); loadCalendar(); }
 }
+
+async function loadCalendar() {
+  try {
+    const r = await fetch("/calendar", { headers: { authorization: "Bearer " + secret() } });
+    const data = await r.json();
+    if (!data.enabled || !data.events?.length) return;
+    calEvents = data.events;
+    $("calEvent").innerHTML = '<option value="">— not linked —</option>' + calEvents.map((e, i) => {
+      const t = new Date(e.start).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      return `<option value="${i}">${t} · ${esc(e.title)}</option>`;
+    }).join("");
+    $("calWrap").classList.remove("hidden");
+  } catch {}
+}
+
+function calChanged() {
+  const i = $("calEvent").value;
+  if (i === "") return;
+  const e = calEvents[+i];
+  $("title").value = e.title;
+  $("attendees").value = e.attendees;
+}
+
 function saveSecret() {
   const v = $("secret").value.trim();
   if (!v) return;
@@ -150,8 +180,12 @@ function stopRecord() {
 function onStopped() {
   recordedBlob = new Blob(chunks, { type: mediaRecorder.mimeType || "audio/mp4" });
   pickedFile = null;
-  const d = new Date();
-  $("title").value = "Meeting " + d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if ($("calEvent")?.value !== "" && calEvents.length) {
+    calChanged(); // keep linked calendar event's title + attendees
+  } else {
+    const d = new Date();
+    $("title").value = "Meeting " + d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
   $("uploadForm").classList.remove("hidden");
   setStatus("Recording ready (" + (recordedBlob.size / 1048576).toFixed(1) + " MB). Add details and upload.");
 }
