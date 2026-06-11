@@ -25,6 +25,31 @@ export default {
       return json({ error: e.message || String(e) }, 500);
     }
   },
+
+  // Cron sweeper: re-runs jobs stuck in enhancing/committing for >10 min
+  async scheduled(event, env, ctx) {
+    const list = await env.AUDIO.list({ prefix: "jobs/", limit: 200 });
+    const now = Date.now();
+    for (const item of list.objects) {
+      const obj = await env.AUDIO.get(item.key);
+      if (!obj) continue;
+      const job = JSON.parse(await obj.text());
+      if (!["enhancing", "committing"].includes(job.status)) continue;
+      const age = now - Date.parse(job.updated_at || job.created_at || 0);
+      if (isNaN(age) || age < 10 * 60e3) continue;
+      if ((job.auto_retries || 0) >= 3) {
+        job.status = "failed";
+        job.error = "Stuck after 3 automatic retries — press retry to try again";
+        await saveJob(env, job);
+        continue;
+      }
+      const t = await env.AUDIO.get(`transcripts/${job.id}.json`);
+      if (!t) continue;
+      job.auto_retries = (job.auto_retries || 0) + 1;
+      await saveJob(env, job);
+      ctx.waitUntil(processTranscript(env, job, JSON.parse(await t.text())));
+    }
+  },
 };
 
 // ---------- auth ----------
@@ -217,13 +242,35 @@ ${segments}`;
     body: JSON.stringify({
       model: env.CLAUDE_MODEL || "claude-sonnet-4-6",
       max_tokens: 32000,
+      stream: true, // streaming avoids Cloudflare's response-header timeout on long generations
       system,
       messages: [{ role: "user", content: user }],
     }),
   });
   if (!r.ok) throw new Error(`Claude error ${r.status}: ${(await r.text()).slice(0, 500)}`);
-  const data = await r.json();
-  const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n");
+
+  // Reassemble the streamed (SSE) response
+  const reader = r.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "", text = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop();
+    for (const line of lines) {
+      if (!line.startsWith("data:")) continue;
+      try {
+        const ev = JSON.parse(line.slice(5).trim());
+        if (ev.type === "content_block_delta" && ev.delta && ev.delta.text) text += ev.delta.text;
+        if (ev.type === "error") throw new Error(`Claude stream error: ${JSON.stringify(ev.error).slice(0, 300)}`);
+      } catch (e) {
+        if (e.message && e.message.startsWith("Claude stream error")) throw e;
+        // ignore JSON parse noise on non-event lines
+      }
+    }
+  }
   if (!text) throw new Error("Claude returned no text");
   return text;
 }
@@ -267,6 +314,7 @@ ${markdownBody}
 // ---------- jobs ----------
 
 async function saveJob(env, job) {
+  job.updated_at = new Date().toISOString();
   await env.AUDIO.put(`jobs/${job.id}.json`, JSON.stringify(job));
 }
 

@@ -9,6 +9,10 @@ rules = [{ type = "Text", globs = ["**/*.html"], fallthrough = true }]
 binding = "AUDIO"
 bucket_name = "meeting-audio"
 
+# Every 10 minutes: re-run jobs stuck in enhancing/committing
+[triggers]
+crons = ["*/10 * * * *"]
+
 [vars]
 GITHUB_OWNER = "harishsm22"
 GITHUB_REPO = "meeting-notes"
@@ -21,3 +25,4 @@ OWNER_NAME = "Harish"
 #   GITHUB_TOKEN              - fine-grained token with Contents read/write on meeting-notes
 #   APP_SECRET                - any password you invent; the recorder app uses it to log in
 #   ELEVENLABS_WEBHOOK_SECRET - (optional) webhook signing secret from ElevenLabs
+#   GCAL_ICS_URL              - (optional) Google Calendar secret iCal address
