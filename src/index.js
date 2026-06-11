@@ -18,6 +18,7 @@ export default {
       if (request.method === "POST" && path === "/webhook/elevenlabs") return await handleWebhook(request, env, ctx);
       if (request.method === "GET" && path === "/jobs") return await listJobs(request, env);
       if (request.method === "GET" && path === "/calendar") return await handleCalendar(request, env);
+      if (request.method === "POST" && path === "/calendar-push") return await handleCalendarPush(request, env);
       if (request.method === "POST" && path === "/retry") return await handleRetry(request, env, ctx);
       return json({ error: "not found" }, 404);
     } catch (e) {
@@ -316,30 +317,55 @@ async function handleRetry(request, env, ctx) {
 // ---------- Google Calendar (secret iCal feed) ----------
 
 // Returns events from 4h ago to 14h ahead so you can pick the meeting
-// before it starts or right after it ends.
+// before it starts or right after it ends. Two sources, in priority order:
+//   1. GCAL_ICS_URL secret (Google Calendar's "secret iCal address")
+//   2. Events pushed by the Google Apps Script (apps-script/Code.gs) to
+//      /calendar-push — for workspace accounts where the secret address
+//      is disabled by an admin.
 async function handleCalendar(request, env) {
   if (!authorized(request, env)) return json({ error: "unauthorized" }, 401);
-  if (!env.GCAL_ICS_URL) return json({ enabled: false, events: [] });
-
-  const r = await fetch(env.GCAL_ICS_URL, { cf: { cacheTtl: 300 } });
-  if (!r.ok) return json({ error: `calendar fetch failed (${r.status})` }, 502);
-
-  const all = parseICS(await r.text());
   const from = Date.now() - 4 * 3600e3;
   const to = Date.now() + 14 * 3600e3;
-
   const events = [];
-  for (const e of all) {
-    const start = nextOccurrence(e, from, to);
-    if (!start) continue;
-    events.push({
-      title: e.summary || "Untitled event",
-      start: new Date(start).toISOString(),
-      attendees: e.attendees.join(", "),
-    });
+
+  if (env.GCAL_ICS_URL) {
+    const r = await fetch(env.GCAL_ICS_URL, { cf: { cacheTtl: 300 } });
+    if (!r.ok) return json({ error: `calendar fetch failed (${r.status})` }, 502);
+    for (const e of parseICS(await r.text())) {
+      const start = nextOccurrence(e, from, to);
+      if (!start) continue;
+      events.push({
+        title: e.summary || "Untitled event",
+        start: new Date(start).toISOString(),
+        attendees: e.attendees.join(", "),
+      });
+    }
+  } else {
+    const obj = await env.AUDIO.get("calendar/events.json");
+    if (!obj) return json({ enabled: false, events: [] });
+    const stored = JSON.parse(await obj.text());
+    for (const e of stored.events || []) {
+      const t = Date.parse(e.start);
+      if (!isNaN(t) && t >= from && t <= to) {
+        events.push({ title: e.title || "Untitled event", start: e.start, attendees: e.attendees || "" });
+      }
+    }
   }
+
   events.sort((a, b) => a.start.localeCompare(b.start));
   return json({ enabled: true, events: events.slice(0, 25) });
+}
+
+// Receives today's events from the Google Apps Script (runs every 15 min)
+async function handleCalendarPush(request, env) {
+  if (!authorized(request, env)) return json({ error: "unauthorized" }, 401);
+  const data = await request.json().catch(() => null);
+  if (!data || !Array.isArray(data.events)) return json({ error: "events array required" }, 400);
+  await env.AUDIO.put("calendar/events.json", JSON.stringify({
+    updated_at: new Date().toISOString(),
+    events: data.events.slice(0, 100),
+  }));
+  return json({ ok: true, count: data.events.length });
 }
 
 function parseICS(ics) {
