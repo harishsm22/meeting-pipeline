@@ -1,0 +1,23 @@
+name = "meeting-pipeline"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+
+# Lets the worker serve the recorder web page
+rules = [{ type = "Text", globs = ["**/*.html"], fallthrough = true }]
+
+[[r2_buckets]]
+binding = "AUDIO"
+bucket_name = "meeting-audio"
+
+[vars]
+GITHUB_OWNER = "harishsm22"
+GITHUB_REPO = "meeting-notes"
+CLAUDE_MODEL = "claude-sonnet-4-6"
+OWNER_NAME = "Harish"
+
+# Secrets (set in Cloudflare dashboard, never in this file):
+#   ELEVENLABS_API_KEY        - from elevenlabs.io
+#   ANTHROPIC_API_KEY         - from console.anthropic.com
+#   GITHUB_TOKEN              - fine-grained token with Contents read/write on meeting-notes
+#   APP_SECRET                - any password you invent; the recorder app uses it to log in
+#   ELEVENLABS_WEBHOOK_SECRET - (optional) webhook signing secret from ElevenLabs

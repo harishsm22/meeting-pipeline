@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0f172a">
+<title>Meeting Recorder</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; }
+  body { font-family: -apple-system, system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; padding: 20px 16px 40px; max-width: 480px; margin: 0 auto; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .sub { color: #94a3b8; font-size: 13px; margin-bottom: 20px; }
+  .card { background: #1e293b; border-radius: 14px; padding: 16px; margin-bottom: 14px; }
+  label { display: block; font-size: 12px; color: #94a3b8; margin: 10px 0 4px; }
+  input[type=text], input[type=password] { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; font-size: 15px; }
+  button { border: 0; border-radius: 10px; padding: 12px 16px; font-size: 15px; font-weight: 600; cursor: pointer; }
+  .btn-rec { width: 100%; padding: 18px; font-size: 17px; background: #dc2626; color: #fff; }
+  .btn-rec.recording { background: #475569; }
+  .btn-primary { background: #2563eb; color: #fff; width: 100%; margin-top: 12px; }
+  .btn-ghost { background: transparent; color: #94a3b8; font-weight: 400; font-size: 13px; padding: 6px; }
+  .timer { font-size: 40px; font-variant-numeric: tabular-nums; text-align: center; margin: 14px 0 6px; }
+  .hint { font-size: 12px; color: #64748b; text-align: center; }
+  .row { display: flex; gap: 8px; }
+  .row button { flex: 1; }
+  .pause { background: #334155; color: #e2e8f0; margin-top: 10px; }
+  .job { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #293548; gap: 8px; font-size: 14px; }
+  .job:last-child { border-bottom: 0; }
+  .job .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .job .d { font-size: 11px; color: #64748b; }
+  .chip { font-size: 11px; padding: 3px 9px; border-radius: 99px; white-space: nowrap; flex-shrink: 0; }
+  .chip.done { background: #064e3b; color: #6ee7b7; }
+  .chip.failed { background: #5f1a1a; color: #fca5a5; }
+  .chip.working { background: #1e3a5f; color: #93c5fd; }
+  a { color: #60a5fa; text-decoration: none; }
+  #status { font-size: 13px; color: #fbbf24; margin-top: 10px; text-align: center; min-height: 18px; }
+  .hidden { display: none !important; }
+  progress { width: 100%; margin-top: 10px; }
+</style>
+</head>
+<body>
+  <h1>Meeting Recorder</h1>
+  <div class="sub">Record → transcribe → enhanced notes in GitHub</div>
+
+  <!-- Settings -->
+  <div class="card" id="setup">
+    <label>Access password (the APP_SECRET you set in Cloudflare)</label>
+    <input type="password" id="secret" placeholder="Paste your app secret">
+    <button class="btn-primary" onclick="saveSecret()">Save</button>
+  </div>
+
+  <!-- Recorder -->
+  <div class="card hidden" id="recorder">
+    <div class="timer" id="timer">00:00</div>
+    <div class="hint" id="recHint">Keep this page open while recording</div>
+    <button class="btn-rec" id="recBtn" onclick="toggleRecord()">● Start recording</button>
+    <button class="pause hidden" id="pauseBtn" onclick="togglePause()" style="width:100%">Pause</button>
+
+    <div id="uploadForm" class="hidden">
+      <label>Meeting title</label>
+      <input type="text" id="title">
+      <label>Attendees (comma-separated, include yourself)</label>
+      <input type="text" id="attendees" placeholder="Harish, Priya, Rahul">
+      <button class="btn-primary" onclick="upload()">Upload &amp; process</button>
+      <progress id="prog" class="hidden"></progress>
+    </div>
+
+    <div id="status"></div>
+    <label style="margin-top:16px">…or upload an existing audio file (e.g. a Zoom/QuickTime recording)</label>
+    <input type="file" id="filePick" accept="audio/*,video/mp4,.m4a,.mp3,.wav,.webm" onchange="pickFile()">
+  </div>
+
+  <!-- Jobs -->
+  <div class="card hidden" id="jobsCard">
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <strong style="font-size:14px">Recent meetings</strong>
+      <button class="btn-ghost" onclick="refreshJobs()">↻ Refresh</button>
+    </div>
+    <div id="jobs"><div class="hint" style="margin-top:10px">Nothing yet</div></div>
+  </div>
+
+<script>
+let mediaRecorder = null, chunks = [], startTs = 0, pausedMs = 0, pauseStart = 0, timerInt = null, wakeLock = null;
+let recordedBlob = null, recordedAt = null, pickedFile = null;
+
+const $ = id => document.getElementById(id);
+const secret = () => localStorage.getItem("app_secret") || "";
+
+function init() {
+  if (secret()) { $("setup").classList.add("hidden"); $("recorder").classList.remove("hidden"); $("jobsCard").classList.remove("hidden"); refreshJobs(); }
+}
+function saveSecret() {
+  const v = $("secret").value.trim();
+  if (!v) return;
+  localStorage.setItem("app_secret", v);
+  init();
+}
+
+function mimeChoice() {
+  if (window.MediaRecorder) {
+    if (MediaRecorder.isTypeSupported("audio/mp4")) return "audio/mp4";
+    if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) return "audio/webm;codecs=opus";
+    if (MediaRecorder.isTypeSupported("audio/webm")) return "audio/webm";
+  }
+  return "";
+}
+
+async function toggleRecord() {
+  if (mediaRecorder && mediaRecorder.state !== "inactive") { stopRecord(); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+    const mime = mimeChoice();
+    mediaRecorder = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 64000 } : undefined);
+    chunks = []; recordedBlob = null; recordedAt = new Date().toISOString(); pausedMs = 0;
+    mediaRecorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+    mediaRecorder.onstop = onStopped;
+    mediaRecorder.start(2000);
+    startTs = Date.now();
+    timerInt = setInterval(tick, 500);
+    $("recBtn").textContent = "■ Stop recording";
+    $("recBtn").classList.add("recording");
+    $("pauseBtn").classList.remove("hidden");
+    $("uploadForm").classList.add("hidden");
+    setStatus("");
+    try { wakeLock = await navigator.wakeLock?.request("screen"); } catch {}
+  } catch (e) {
+    setStatus("Microphone access failed: " + e.message);
+  }
+}
+
+function togglePause() {
+  if (!mediaRecorder) return;
+  if (mediaRecorder.state === "recording") { mediaRecorder.pause(); pauseStart = Date.now(); $("pauseBtn").textContent = "Resume"; }
+  else if (mediaRecorder.state === "paused") { mediaRecorder.resume(); pausedMs += Date.now() - pauseStart; $("pauseBtn").textContent = "Pause"; }
+}
+
+function stopRecord() {
+  clearInterval(timerInt);
+  mediaRecorder.stop();
+  mediaRecorder.stream.getTracks().forEach(t => t.stop());
+  try { wakeLock?.release(); } catch {}
+  $("recBtn").textContent = "● Start recording";
+  $("recBtn").classList.remove("recording");
+  $("pauseBtn").classList.add("hidden");
+  $("pauseBtn").textContent = "Pause";
+}
+
+function onStopped() {
+  recordedBlob = new Blob(chunks, { type: mediaRecorder.mimeType || "audio/mp4" });
+  pickedFile = null;
+  const d = new Date();
+  $("title").value = "Meeting " + d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  $("uploadForm").classList.remove("hidden");
+  setStatus("Recording ready (" + (recordedBlob.size / 1048576).toFixed(1) + " MB). Add details and upload.");
+}
+
+function pickFile() {
+  const f = $("filePick").files[0];
+  if (!f) return;
+  pickedFile = f; recordedBlob = null;
+  recordedAt = new Date(f.lastModified || Date.now()).toISOString();
+  $("title").value = f.name.replace(/\.[^.]+$/, "");
+  $("uploadForm").classList.remove("hidden");
+  setStatus("File ready (" + (f.size / 1048576).toFixed(1) + " MB). Add details and upload.");
+}
+
+function tick() {
+  let ms = Date.now() - startTs - pausedMs;
+  if (mediaRecorder?.state === "paused") ms = pauseStart - startTs - pausedMs;
+  const s = Math.floor(ms / 1000);
+  $("timer").textContent = String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
+}
+
+async function upload() {
+  const blob = pickedFile || recordedBlob;
+  if (!blob) { setStatus("Nothing to upload"); return; }
+  const fd = new FormData();
+  const name = pickedFile ? pickedFile.name : ("recording." + ((blob.type || "").includes("mp4") ? "m4a" : "webm"));
+  fd.append("file", blob, name);
+  fd.append("title", $("title").value || "Untitled meeting");
+  fd.append("attendees", $("attendees").value || "");
+  fd.append("recorded_at", recordedAt || new Date().toISOString());
+  setStatus("Uploading…"); $("prog").classList.remove("hidden");
+  try {
+    const r = await fetch("/upload", { method: "POST", headers: { authorization: "Bearer " + secret() }, body: fd });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+    setStatus("Uploaded ✓ Transcription started. Notes will appear in GitHub in a few minutes.");
+    $("uploadForm").classList.add("hidden");
+    $("timer").textContent = "00:00";
+    $("filePick").value = ""; pickedFile = null; recordedBlob = null;
+    refreshJobs();
+  } catch (e) {
+    setStatus("Upload failed: " + e.message);
+  } finally {
+    $("prog").classList.add("hidden");
+  }
+}
+
+async function refreshJobs() {
+  if (!secret()) return;
+  try {
+    const r = await fetch("/jobs", { headers: { authorization: "Bearer " + secret() } });
+    if (r.status === 401) { localStorage.removeItem("app_secret"); location.reload(); return; }
+    const data = await r.json();
+    renderJobs(data.jobs || []);
+  } catch {}
+}
+
+function renderJobs(jobs) {
+  if (!jobs.length) return;
+  $("jobs").innerHTML = jobs.map(j => {
+    const cls = j.status === "done" ? "done" : j.status === "failed" ? "failed" : "working";
+    const label = j.status === "done" ? "done" : j.status === "failed" ? "failed" : j.status + "…";
+    const title = j.github_url ? `<a href="${j.github_url}" target="_blank">${esc(j.title)}</a>` : esc(j.title);
+    const retry = j.status === "failed" ? ` <button class="btn-ghost" onclick="retryJob('${j.id}')">retry</button>` : "";
+    const err = j.status === "failed" && j.error ? `<div class="d">${esc(j.error.slice(0, 120))}</div>` : "";
+    return `<div class="job"><div class="t">${title}<div class="d">${new Date(j.created_at).toLocaleString()}</div>${err}</div><span class="chip ${cls}">${label}</span>${retry}</div>`;
+  }).join("");
+}
+
+async function retryJob(id) {
+  setStatus("Retrying…");
+  await fetch("/retry?id=" + id, { method: "POST", headers: { authorization: "Bearer " + secret() } });
+  setStatus("");
+  refreshJobs();
+}
+
+function esc(s) { return (s || "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+function setStatus(s) { $("status").textContent = s; }
+
+setInterval(() => { if (document.visibilityState === "visible" && (!mediaRecorder || mediaRecorder.state === "inactive")) refreshJobs(); }, 30000);
+init();
+</script>
+</body>
+</html>
