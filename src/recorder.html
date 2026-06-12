@@ -4,50 +4,70 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#F6F7F9">
 <title>Meeting Recorder</title>
 <style>
-  :root { color-scheme: dark; }
+  :root { color-scheme: light; }
   * { box-sizing: border-box; margin: 0; }
-  body { font-family: -apple-system, system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; padding: 20px 16px 40px; max-width: 480px; margin: 0 auto; }
-  h1 { font-size: 20px; margin-bottom: 4px; }
-  .sub { color: #94a3b8; font-size: 13px; margin-bottom: 20px; }
-  .card { background: #1e293b; border-radius: 14px; padding: 16px; margin-bottom: 14px; }
-  label { display: block; font-size: 12px; color: #94a3b8; margin: 10px 0 4px; }
-  input[type=text], input[type=password], select { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; font-size: 15px; }
-  select { appearance: none; margin-bottom: 10px; }
-  button { border: 0; border-radius: 10px; padding: 12px 16px; font-size: 15px; font-weight: 600; cursor: pointer; }
-  .btn-rec { width: 100%; padding: 18px; font-size: 17px; background: #dc2626; color: #fff; }
-  .btn-rec.recording { background: #475569; }
-  .btn-primary { background: #2563eb; color: #fff; width: 100%; margin-top: 12px; }
-  .btn-ghost { background: transparent; color: #94a3b8; font-weight: 400; font-size: 13px; padding: 6px; }
-  .timer { font-size: 40px; font-variant-numeric: tabular-nums; text-align: center; margin: 14px 0 6px; }
-  .hint { font-size: 12px; color: #64748b; text-align: center; }
+  body { font-family: -apple-system, system-ui, sans-serif; background: #F6F7F9; color: #1B2330; min-height: 100vh; padding: 22px 16px 48px; }
+  .wrap { max-width: 440px; margin: 0 auto; }
+  .head { display: flex; align-items: center; gap: 11px; padding: 0 4px 16px; }
+  .logo { width: 38px; height: 38px; border-radius: 11px; background: #4263EB; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 19px; }
+  .head h1 { font-size: 17px; font-weight: 600; }
+  .head p { font-size: 12px; color: #7A8494; }
+  .card { background: #fff; border: 1px solid #E4E8EE; border-radius: 16px; padding: 16px; margin-bottom: 14px; }
+  label { display: block; font-size: 12px; color: #7A8494; margin: 12px 0 6px; }
+  input[type=text], input[type=password], select { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #D9DEE6; background: #FBFCFD; color: #1B2330; font-size: 15px; }
+  input:focus, select:focus { outline: none; border-color: #4263EB; }
+  select { appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%237A8494' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 34px; }
+  button { border: 0; border-radius: 12px; padding: 13px 16px; font-size: 15px; font-weight: 600; cursor: pointer; font-family: inherit; }
+  .btn-rec { width: 100%; background: #E2504A; color: #fff; padding: 15px; font-size: 16px; }
+  .btn-stop { flex: 1; background: #E2504A; color: #fff; }
+  .btn-pause { width: 92px; background: #fff; border: 1px solid #D9DEE6; color: #3D4554; font-weight: 500; }
+  .btn-primary { width: 100%; background: #4263EB; color: #fff; margin-top: 14px; }
+  .btn-ghost { background: transparent; color: #7A8494; font-weight: 500; font-size: 13px; padding: 6px; }
   .row { display: flex; gap: 8px; }
-  .row button { flex: 1; }
-  .pause { background: #334155; color: #e2e8f0; margin-top: 10px; }
-  .job { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #293548; gap: 8px; font-size: 14px; }
-  .job:last-child { border-bottom: 0; }
+  .timer { font-size: 44px; font-weight: 500; font-variant-numeric: tabular-nums; text-align: center; margin: 16px 0 2px; }
+  .hint { font-size: 12px; color: #9AA3B2; text-align: center; margin-bottom: 16px; }
+  .chipbox { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; border: 1px solid #D9DEE6; border-radius: 12px; background: #FBFCFD; padding: 7px; cursor: text; }
+  .chipbox:focus-within { border-color: #4263EB; }
+  .chip-tag { display: inline-flex; align-items: center; gap: 6px; background: #EAEEFC; color: #2A41A5; font-size: 13px; font-weight: 500; padding: 5px 6px 5px 11px; border-radius: 99px; }
+  .chip-tag button { background: #fff; color: #2A41A5; border-radius: 50%; width: 18px; height: 18px; padding: 0; font-size: 12px; line-height: 18px; font-weight: 600; }
+  .chipbox input { flex: 1; min-width: 90px; border: 0 !important; background: transparent !important; padding: 5px 6px; font-size: 14px; }
+  .chipbox input:focus { outline: none; }
+  .micro { font-size: 11px; color: #9AA3B2; margin: 6px 2px 0; }
+  .suggest { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .suggest button { display: inline-flex; align-items: center; gap: 4px; background: #fff; border: 1px solid #D9DEE6; color: #3D4554; font-size: 13px; font-weight: 500; padding: 6px 12px; border-radius: 99px; }
+  .job { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 0; border-bottom: 1px solid #EDF0F4; font-size: 14px; }
+  .job:last-child { border-bottom: 0; padding-bottom: 2px; }
   .job .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .job .d { font-size: 11px; color: #64748b; }
-  .chip { font-size: 11px; padding: 3px 9px; border-radius: 99px; white-space: nowrap; flex-shrink: 0; }
-  .chip.done { background: #064e3b; color: #6ee7b7; }
-  .chip.failed { background: #5f1a1a; color: #fca5a5; }
-  .chip.working { background: #1e3a5f; color: #93c5fd; }
-  a { color: #60a5fa; text-decoration: none; }
-  #status { font-size: 13px; color: #fbbf24; margin-top: 10px; text-align: center; min-height: 18px; }
+  .job .d { font-size: 11px; color: #9AA3B2; }
+  .chip { font-size: 11px; font-weight: 600; padding: 4px 11px; border-radius: 99px; white-space: nowrap; flex-shrink: 0; }
+  .chip.done { background: #E1F5EE; color: #0F6E56; }
+  .chip.failed { background: #FCEBEB; color: #A32D2D; }
+  .chip.working { background: #E6F1FB; color: #185FA5; }
+  a { color: #2B5BD7; text-decoration: none; }
+  #status { font-size: 13px; color: #B7791F; margin-top: 12px; text-align: center; min-height: 18px; }
   .hidden { display: none !important; }
   progress { width: 100%; margin-top: 10px; }
+  .divider { border-top: 1px solid #EDF0F4; margin: 16px 0 2px; }
+  input[type=file] { font-size: 13px; color: #7A8494; margin-top: 6px; }
 </style>
 </head>
 <body>
-  <h1>Meeting Recorder</h1>
-  <div class="sub">Record → transcribe → enhanced notes in GitHub</div>
+<div class="wrap">
+  <div class="head">
+    <div class="logo">&#9679;</div>
+    <div>
+      <h1>Recorder</h1>
+      <p>Record &rarr; transcribe &rarr; notes in GitHub</p>
+    </div>
+  </div>
 
   <!-- Settings -->
   <div class="card" id="setup">
-    <label>Access password (the APP_SECRET you set in Cloudflare)</label>
+    <label style="margin-top:0">Access password (the APP_SECRET you set in Cloudflare)</label>
     <input type="password" id="secret" placeholder="Paste your app secret">
     <button class="btn-primary" onclick="saveSecret()">Save</button>
   </div>
@@ -55,25 +75,33 @@
   <!-- Recorder -->
   <div class="card hidden" id="recorder">
     <div class="hidden" id="calWrap">
-      <label>Calendar event (auto-fills title &amp; attendees)</label>
-      <select id="calEvent" onchange="calChanged()"><option value="">— not linked —</option></select>
+      <label style="margin-top:0">Calendar event (auto-fills title &amp; attendees)</label>
+      <select id="calEvent" onchange="calChanged()"><option value="">&mdash; not linked &mdash;</option></select>
     </div>
     <div class="timer" id="timer">00:00</div>
     <div class="hint" id="recHint">Keep this page open while recording</div>
-    <button class="btn-rec" id="recBtn" onclick="toggleRecord()">● Start recording</button>
-    <button class="pause hidden" id="pauseBtn" onclick="togglePause()" style="width:100%">Pause</button>
+    <button class="btn-rec" id="recBtn" onclick="toggleRecord()">&#9679;&nbsp; Start recording</button>
+    <div class="row hidden" id="recControls">
+      <button class="btn-stop" onclick="toggleRecord()">&#9632;&nbsp; Stop</button>
+      <button class="btn-pause" id="pauseBtn" onclick="togglePause()">Pause</button>
+    </div>
 
     <div id="uploadForm" class="hidden">
+      <div class="divider"></div>
       <label>Meeting title</label>
       <input type="text" id="title">
-      <label>Attendees (comma-separated, include yourself)</label>
-      <input type="text" id="attendees" placeholder="Harish, Priya, Rahul">
-      <button class="btn-primary" onclick="upload()">Upload &amp; process</button>
+      <label>Attendees</label>
+      <div class="chipbox" id="chipBox" onclick="document.getElementById('attInput').focus()">
+        <input id="attInput" placeholder="Add name&hellip;" autocomplete="off">
+      </div>
+      <div class="micro">Tap &times; to remove &middot; type a name, then comma or return to add</div>
+      <div class="suggest" id="suggest"></div>
+      <button class="btn-primary" onclick="upload()">&#8682;&nbsp; Upload &amp; process</button>
       <progress id="prog" class="hidden"></progress>
     </div>
 
     <div id="status"></div>
-    <label style="margin-top:16px">…or upload an existing audio file (e.g. a Zoom/QuickTime recording)</label>
+    <label>&hellip;or upload an existing audio file (e.g. a Zoom/QuickTime recording)</label>
     <input type="file" id="filePick" accept="audio/*,video/mp4,.m4a,.mp3,.wav,.webm" onchange="pickFile()">
   </div>
 
@@ -81,22 +109,29 @@
   <div class="card hidden" id="jobsCard">
     <div class="row" style="justify-content:space-between;align-items:center">
       <strong style="font-size:14px">Recent meetings</strong>
-      <button class="btn-ghost" onclick="refreshJobs()">↻ Refresh</button>
+      <button class="btn-ghost" onclick="refreshJobs()">&#8635; Refresh</button>
     </div>
-    <div id="jobs"><div class="hint" style="margin-top:10px">Nothing yet</div></div>
+    <div id="jobs"><div class="hint" style="margin:10px 0 2px">Nothing yet</div></div>
   </div>
+</div>
 
 <script>
 let mediaRecorder = null, chunks = [], startTs = 0, pausedMs = 0, pauseStart = 0, timerInt = null, wakeLock = null;
 let recordedBlob = null, recordedAt = null, pickedFile = null;
+let calEvents = [], attendees = [];
 
 const $ = id => document.getElementById(id);
 const secret = () => localStorage.getItem("app_secret") || "";
 
-let calEvents = [];
-
 function init() {
   if (secret()) { $("setup").classList.add("hidden"); $("recorder").classList.remove("hidden"); $("jobsCard").classList.remove("hidden"); refreshJobs(); loadCalendar(); }
+}
+
+function saveSecret() {
+  const v = $("secret").value.trim();
+  if (!v) return;
+  localStorage.setItem("app_secret", v);
+  init();
 }
 
 async function loadCalendar() {
@@ -105,7 +140,7 @@ async function loadCalendar() {
     const data = await r.json();
     if (!data.enabled || !data.events?.length) return;
     calEvents = data.events;
-    $("calEvent").innerHTML = '<option value="">— not linked —</option>' + calEvents.map((e, i) => {
+    $("calEvent").innerHTML = '<option value="">&mdash; not linked &mdash;</option>' + calEvents.map((e, i) => {
       const t = new Date(e.start).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
       return `<option value="${i}">${t} · ${esc(e.title)}</option>`;
     }).join("");
@@ -118,15 +153,80 @@ function calChanged() {
   if (i === "") return;
   const e = calEvents[+i];
   $("title").value = e.title;
-  $("attendees").value = e.attendees;
+  setAttendees(e.attendees);
 }
 
-function saveSecret() {
-  const v = $("secret").value.trim();
-  if (!v) return;
-  localStorage.setItem("app_secret", v);
-  init();
+function nameOf(v) {
+  const m = v.match(/^([^<]+)</);
+  return (m ? m[1] : v).trim();
 }
+
+function setAttendees(str) {
+  attendees = (str || "").split(",").map(s => s.trim()).filter(Boolean);
+  renderChips();
+}
+
+function addAttendee(v) {
+  v = (v || "").trim().replace(/,+$/, "");
+  if (!v) return;
+  const lower = nameOf(v).toLowerCase();
+  if (attendees.some(a => nameOf(a).toLowerCase() === lower)) return;
+  attendees.push(v);
+  renderChips();
+}
+
+function removeAtt(i) {
+  attendees.splice(i, 1);
+  renderChips();
+}
+
+function renderChips() {
+  const box = $("chipBox"), input = $("attInput");
+  box.querySelectorAll(".chip-tag").forEach(el => el.remove());
+  attendees.forEach((v, i) => {
+    const span = document.createElement("span");
+    span.className = "chip-tag";
+    span.appendChild(document.createTextNode(nameOf(v)));
+    const b = document.createElement("button");
+    b.textContent = "×";
+    b.setAttribute("aria-label", "Remove " + nameOf(v));
+    b.onclick = ev => { ev.stopPropagation(); removeAtt(i); };
+    span.appendChild(b);
+    box.insertBefore(span, input);
+  });
+  renderSuggest();
+}
+
+function renderSuggest() {
+  const recent = JSON.parse(localStorage.getItem("recent_people") || "[]");
+  const current = attendees.map(a => nameOf(a).toLowerCase());
+  const opts = recent.filter(v => !current.includes(nameOf(v).toLowerCase())).slice(0, 6);
+  $("suggest").innerHTML = "";
+  for (const v of opts) {
+    const b = document.createElement("button");
+    b.textContent = "+ " + nameOf(v);
+    b.onclick = () => addAttendee(v);
+    $("suggest").appendChild(b);
+  }
+}
+
+function rememberPeople() {
+  let recent = JSON.parse(localStorage.getItem("recent_people") || "[]");
+  for (const v of attendees) {
+    recent = recent.filter(r => nameOf(r).toLowerCase() !== nameOf(v).toLowerCase());
+    recent.unshift(v);
+  }
+  localStorage.setItem("recent_people", JSON.stringify(recent.slice(0, 8)));
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const input = $("attInput");
+  input.addEventListener("keydown", e => {
+    if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addAttendee(input.value); input.value = ""; }
+    else if (e.key === "Backspace" && !input.value && attendees.length) { removeAtt(attendees.length - 1); }
+  });
+  input.addEventListener("blur", () => { if (input.value.trim()) { addAttendee(input.value); input.value = ""; } });
+});
 
 function mimeChoice() {
   if (window.MediaRecorder) {
@@ -150,10 +250,10 @@ async function toggleRecord() {
     mediaRecorder.start(2000);
     startTs = Date.now();
     timerInt = setInterval(tick, 500);
-    $("recBtn").textContent = "■ Stop recording";
-    $("recBtn").classList.add("recording");
-    $("pauseBtn").classList.remove("hidden");
+    $("recBtn").classList.add("hidden");
+    $("recControls").classList.remove("hidden");
     $("uploadForm").classList.add("hidden");
+    $("recHint").textContent = "Recording · keep this page open";
     setStatus("");
     try { wakeLock = await navigator.wakeLock?.request("screen"); } catch {}
   } catch (e) {
@@ -172,20 +272,21 @@ function stopRecord() {
   mediaRecorder.stop();
   mediaRecorder.stream.getTracks().forEach(t => t.stop());
   try { wakeLock?.release(); } catch {}
-  $("recBtn").textContent = "● Start recording";
-  $("recBtn").classList.remove("recording");
-  $("pauseBtn").classList.add("hidden");
+  $("recBtn").classList.remove("hidden");
+  $("recControls").classList.add("hidden");
   $("pauseBtn").textContent = "Pause";
+  $("recHint").textContent = "Keep this page open while recording";
 }
 
 function onStopped() {
   recordedBlob = new Blob(chunks, { type: mediaRecorder.mimeType || "audio/mp4" });
   pickedFile = null;
   if ($("calEvent")?.value !== "" && calEvents.length) {
-    calChanged(); // keep linked calendar event's title + attendees
+    calChanged();
   } else {
     const d = new Date();
     $("title").value = "Meeting " + d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    renderChips();
   }
   $("uploadForm").classList.remove("hidden");
   setStatus("Recording ready (" + (recordedBlob.size / 1048576).toFixed(1) + " MB). Add details and upload.");
@@ -197,6 +298,7 @@ function pickFile() {
   pickedFile = f; recordedBlob = null;
   recordedAt = new Date(f.lastModified || Date.now()).toISOString();
   $("title").value = f.name.replace(/\.[^.]+$/, "");
+  renderChips();
   $("uploadForm").classList.remove("hidden");
   setStatus("File ready (" + (f.size / 1048576).toFixed(1) + " MB). Add details and upload.");
 }
@@ -211,21 +313,25 @@ function tick() {
 async function upload() {
   const blob = pickedFile || recordedBlob;
   if (!blob) { setStatus("Nothing to upload"); return; }
+  const pending = $("attInput").value.trim();
+  if (pending) { addAttendee(pending); $("attInput").value = ""; }
   const fd = new FormData();
   const name = pickedFile ? pickedFile.name : ("recording." + ((blob.type || "").includes("mp4") ? "m4a" : "webm"));
   fd.append("file", blob, name);
   fd.append("title", $("title").value || "Untitled meeting");
-  fd.append("attendees", $("attendees").value || "");
+  fd.append("attendees", attendees.join(", "));
   fd.append("recorded_at", recordedAt || new Date().toISOString());
   setStatus("Uploading…"); $("prog").classList.remove("hidden");
   try {
     const r = await fetch("/upload", { method: "POST", headers: { authorization: "Bearer " + secret() }, body: fd });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+    rememberPeople();
     setStatus("Uploaded ✓ Transcription started. Notes will appear in GitHub in a few minutes.");
     $("uploadForm").classList.add("hidden");
     $("timer").textContent = "00:00";
     $("filePick").value = ""; pickedFile = null; recordedBlob = null;
+    attendees = []; renderChips();
     refreshJobs();
   } catch (e) {
     setStatus("Upload failed: " + e.message + " — your recording is still here, fix the issue and press Upload again.");
@@ -253,7 +359,7 @@ function renderJobs(jobs) {
     const stale = !["done", "failed"].includes(j.status) && (Date.now() - Date.parse(j.updated_at || j.created_at)) > 10 * 60e3;
     const retry = (j.status === "failed" || stale) ? ` <button class="btn-ghost" onclick="retryJob('${j.id}')">retry</button>` : "";
     const err = j.status === "failed" && j.error ? `<div class="d">${esc(j.error.slice(0, 120))}</div>` : "";
-    return `<div class="job"><div class="t">${title}<div class="d">${new Date(j.created_at).toLocaleString()}</div>${err}</div><span class="chip ${cls}">${label}</span>${retry}</div>`;
+    return `<div class="job"><div class="t">${title}<div class="d">${new Date(j.created_at).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</div>${err}</div><span class="chip ${cls}">${label}</span>${retry}</div>`;
   }).join("");
 }
 
