@@ -163,6 +163,9 @@ async function processTranscript(env, job, transcription) {
     await saveJob(env, job);
 
     const segments = buildSegments(transcription);
+    if (!segments || segments.trim().length < 20) {
+      throw new Error("Empty recording — no speech detected in the audio");
+    }
     const enhanced = await enhanceWithClaude(env, job, segments);
 
     job.status = "committing";
@@ -409,11 +412,17 @@ async function handleCalendarPush(request, env) {
   if (!authorized(request, env)) return json({ error: "unauthorized" }, 401);
   const data = await request.json().catch(() => null);
   if (!data || !Array.isArray(data.events)) return json({ error: "events array required" }, 400);
+  // Drop meeting-room resources from attendee lists
+  const cleaned = data.events.slice(0, 100).map(e => ({
+    ...e,
+    attendees: (e.attendees || "").split(",").map(s => s.trim())
+      .filter(a => a && !a.includes("resource.calendar.google.com")).join(", "),
+  }));
   await env.AUDIO.put("calendar/events.json", JSON.stringify({
     updated_at: new Date().toISOString(),
-    events: data.events.slice(0, 100),
+    events: cleaned,
   }));
-  return json({ ok: true, count: data.events.length });
+  return json({ ok: true, count: cleaned.length });
 }
 
 function parseICS(ics) {
@@ -437,7 +446,7 @@ function parseICS(ics) {
     else if (prop === "ATTENDEE" || prop === "ORGANIZER") {
       const email = value.replace(/^mailto:/i, "").trim();
       const name = (params.CN || "").replace(/^"|"$/g, "");
-      if (email.includes("@") && cur.attendees.length < 50) {
+      if (email.includes("@") && !email.includes("resource.calendar.google.com") && cur.attendees.length < 50) {
         cur.attendees.push(name && !name.includes("@") ? `${name} <${email}>` : email);
       }
     }

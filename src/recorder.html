@@ -139,6 +139,7 @@ function mimeChoice() {
 
 async function toggleRecord() {
   if (mediaRecorder && mediaRecorder.state !== "inactive") { stopRecord(); return; }
+  if ((recordedBlob || pickedFile) && !confirm("⚠️ You have a recording that hasn't been uploaded yet. Starting a new one will DELETE it permanently. Upload it first?\n\nPress Cancel to keep it, OK to delete and start fresh.")) return;
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
     const mime = mimeChoice();
@@ -227,7 +228,7 @@ async function upload() {
     $("filePick").value = ""; pickedFile = null; recordedBlob = null;
     refreshJobs();
   } catch (e) {
-    setStatus("Upload failed: " + e.message);
+    setStatus("Upload failed: " + e.message + " — your recording is still here, fix the issue and press Upload again.");
   } finally {
     $("prog").classList.add("hidden");
   }
@@ -265,6 +266,10 @@ async function retryJob(id) {
 
 function esc(s) { return (s || "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 function setStatus(s) { $("status").textContent = s; }
+
+window.addEventListener("beforeunload", e => {
+  if (recordedBlob || (mediaRecorder && mediaRecorder.state !== "inactive")) { e.preventDefault(); e.returnValue = ""; }
+});
 
 setInterval(() => { if (document.visibilityState === "visible" && (!mediaRecorder || mediaRecorder.state === "inactive")) refreshJobs(); }, 30000);
 init();
