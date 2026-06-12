@@ -10,7 +10,7 @@
 <style>
   :root { color-scheme: light; }
   * { box-sizing: border-box; margin: 0; }
-  body { font-family: -apple-system, system-ui, sans-serif; background: #F6F7F9; color: #1B2330; min-height: 100vh; padding: 22px 16px 48px; }
+  body { font-family: -apple-system, system-ui, sans-serif; background: #F6F7F9; color: #1B2330; min-height: 100vh; padding: calc(22px + env(safe-area-inset-top)) 16px calc(48px + env(safe-area-inset-bottom)); }
   .wrap { max-width: 440px; margin: 0 auto; }
   .head { display: flex; align-items: center; gap: 11px; padding: 0 4px 16px; }
   .logo { width: 38px; height: 38px; border-radius: 11px; background: #4263EB; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 19px; }
