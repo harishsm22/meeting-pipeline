@@ -1,10 +1,10 @@
 // Meeting Pipeline — Cloudflare Worker
 // Flow: /upload (audio) -> R2 + ElevenLabs Scribe (async, diarized)
-//       /webhook/elevenlabs (transcript) -> Claude (speaker naming + enhancement) -> GitHub commit
+//       /webhook/elevenlabs (transcript) -> raw transcript committed to GitHub,
+//       where a Claude Code GitHub Action writes the polished note and
+//       maintains the org context files.
 
 import RECORDER_HTML from "./recorder.html";
-
-const ANTHROPIC_VERSION = "2023-06-01";
 
 export default {
   async fetch(request, env, ctx) {
@@ -151,7 +151,7 @@ async function handleWebhook(request, env, ctx) {
   const job = await loadJob(env, jobId);
   if (!job) return json({ ok: true, warning: "unknown job" });
 
-  // Acknowledge immediately; do the slow work (Claude + GitHub) in the background.
+  // Acknowledge immediately; do the slow work in the background.
   ctx.waitUntil(processTranscript(env, job, transcription));
   return json({ ok: true });
 }
@@ -159,22 +159,36 @@ async function handleWebhook(request, env, ctx) {
 async function processTranscript(env, job, transcription) {
   try {
     await env.AUDIO.put(`transcripts/${job.id}.json`, JSON.stringify(transcription));
-    job.status = "enhancing";
+    job.status = "committing";
     await saveJob(env, job);
 
     const segments = buildSegments(transcription);
     if (!segments || segments.trim().length < 20) {
       throw new Error("Empty recording — no speech detected in the audio");
     }
-    const enhanced = await enhanceWithClaude(env, job, segments);
 
-    job.status = "committing";
-    await saveJob(env, job);
+    // Commit the raw transcript; the Claude Code GitHub Action in the
+    // notes repo picks it up, writes the polished note at note_path,
+    // and updates the context files.
+    const d = new Date(job.recorded_at);
+    const yyyy = d.getUTCFullYear();
+    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(d.getUTCDate()).padStart(2, "0");
+    const notePath = `meetings/${yyyy}/${mm}/${yyyy}-${mm}-${dd}-${slug(job.title)}-${job.id}.md`;
 
-    const ghPath = await commitToGitHub(env, job, enhanced);
+    const raw = {
+      job_id: job.id,
+      title: job.title,
+      attendees: job.attendees,
+      recorded_at: job.recorded_at,
+      note_path: notePath,
+      transcript: segments,
+    };
+    await ghPut(env, `raw/${job.id}.json`, JSON.stringify(raw, null, 2), `Add raw transcript: ${job.title}`);
+
     job.status = "done";
-    job.github_path = ghPath;
-    job.github_url = `https://github.com/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/blob/main/${ghPath}`;
+    job.github_path = notePath;
+    job.github_url = `https://github.com/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/blob/main/${notePath}`;
     await saveJob(env, job);
   } catch (e) {
     job.status = "failed";
@@ -204,112 +218,24 @@ function buildSegments(transcription) {
   return lines.join("\n\n");
 }
 
-// ---------- Claude enhancement ----------
-
-async function enhanceWithClaude(env, job, segments) {
-  const system = `You convert raw diarized meeting transcripts into polished meeting notes.
-The transcript labels speakers as speaker_0, speaker_1, etc. Your tasks:
-1. Identify who each speaker is, using the attendee list, how people address each other, self-introductions, and context. The recorder/organizer is usually "${env.OWNER_NAME || "the organizer"}". If you cannot identify a speaker confidently, keep them as "Speaker N (unidentified)".
-2. Produce clean meeting notes in this exact structure (markdown, no preamble, no code fences):
-
-## Summary
-(3-6 sentences)
-
-## Participants
-(bullet list: name — speaker label you mapped them from, and a confidence note if unsure)
-
-## Key decisions
-(bullet list; write "None recorded" if none)
-
-## Action items
-(bullet list as "Owner — action"; write "None recorded" if none)
-
-## Transcript
-(the full conversation with real names as bold speaker labels, cleaned up: remove filler words and false starts, fix obvious transcription errors, merge fragmented sentences. Do NOT summarize or drop content — keep every substantive statement.)`;
-
-  const user = `Meeting title: ${job.title}
-Recorded at: ${job.recorded_at}
-Attendees (per organizer, may be incomplete): ${job.attendees || "not provided"}
-
-Diarized transcript:
-
-${segments}`;
-
-  const r = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "x-api-key": env.ANTHROPIC_API_KEY,
-      "anthropic-version": ANTHROPIC_VERSION,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: env.CLAUDE_MODEL || "claude-sonnet-4-6",
-      max_tokens: 32000,
-      stream: true, // streaming avoids Cloudflare's response-header timeout on long generations
-      system,
-      messages: [{ role: "user", content: user }],
-    }),
-  });
-  if (!r.ok) throw new Error(`Claude error ${r.status}: ${(await r.text()).slice(0, 500)}`);
-
-  // Reassemble the streamed (SSE) response
-  const reader = r.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = "", text = "";
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    const lines = buf.split("\n");
-    buf = lines.pop();
-    for (const line of lines) {
-      if (!line.startsWith("data:")) continue;
-      try {
-        const ev = JSON.parse(line.slice(5).trim());
-        if (ev.type === "content_block_delta" && ev.delta && ev.delta.text) text += ev.delta.text;
-        if (ev.type === "error") throw new Error(`Claude stream error: ${JSON.stringify(ev.error).slice(0, 300)}`);
-      } catch (e) {
-        if (e.message && e.message.startsWith("Claude stream error")) throw e;
-        // ignore JSON parse noise on non-event lines
-      }
-    }
-  }
-  if (!text) throw new Error("Claude returned no text");
-  return text;
-}
-
 // ---------- GitHub commit ----------
 
-async function commitToGitHub(env, job, markdownBody) {
-  const d = new Date(job.recorded_at);
-  const yyyy = d.getUTCFullYear();
-  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(d.getUTCDate()).padStart(2, "0");
-  const path = `meetings/${yyyy}/${mm}/${yyyy}-${mm}-${dd}-${slug(job.title)}-${job.id}.md`;
-
-  const md = `---
-title: "${job.title.replace(/"/g, "'")}"
-date: ${job.recorded_at}
-attendees: "${(job.attendees || "").replace(/"/g, "'")}"
-job_id: ${job.id}
----
-
-${markdownBody}
-`;
-
-  const r = await fetch(
-    `https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/contents/${path}`,
-    {
-      method: "PUT",
-      headers: {
-        authorization: `Bearer ${env.GITHUB_TOKEN}`,
-        accept: "application/vnd.github+json",
-        "user-agent": "meeting-pipeline-worker",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ message: `Add meeting notes: ${job.title}`, content: b64(md) }),
-    }
-  );
+async function ghPut(env, path, content, message) {
+  const base = `https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/contents/${path}`;
+  const headers = {
+    authorization: `Bearer ${env.GITHUB_TOKEN}`,
+    accept: "application/vnd.github+json",
+    "user-agent": "meeting-pipeline-worker",
+  };
+  // If the file already exists (e.g. a retry), we must send its sha
+  let sha;
+  const existing = await fetch(base, { headers });
+  if (existing.ok) sha = (await existing.json()).sha;
+  const r = await fetch(base, {
+    method: "PUT",
+    headers: { ...headers, "content-type": "application/json" },
+    body: JSON.stringify({ message, content: b64(content), ...(sha ? { sha } : {}) }),
+  });
   if (!r.ok) throw new Error(`GitHub error ${r.status}: ${(await r.text()).slice(0, 500)}`);
   return path;
 }
@@ -338,8 +264,8 @@ async function listJobs(request, env) {
   return json({ jobs: jobs.slice(0, 50) });
 }
 
-// Re-run a failed job. If we already have the transcript, redo Claude+GitHub;
-// otherwise resubmit the stored audio to ElevenLabs.
+// Re-run a failed job. If we already have the transcript, redo the
+// GitHub commit; otherwise resubmit the stored audio to ElevenLabs.
 async function handleRetry(request, env, ctx) {
   if (!authorized(request, env)) return json({ error: "unauthorized" }, 401);
   const id = new URL(request.url).searchParams.get("id");
@@ -349,7 +275,7 @@ async function handleRetry(request, env, ctx) {
   const t = await env.AUDIO.get(`transcripts/${job.id}.json`);
   if (t) {
     const transcription = JSON.parse(await t.text());
-    job.status = "enhancing"; job.error = undefined;
+    job.status = "committing"; job.error = undefined;
     await saveJob(env, job);
     ctx.waitUntil(processTranscript(env, job, transcription));
     return json({ ok: true, resumed_from: "transcript" });
