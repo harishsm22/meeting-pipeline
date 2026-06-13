@@ -30,6 +30,12 @@
   .row { display: flex; gap: 8px; }
   .timer { font-size: 44px; font-weight: 500; font-variant-numeric: tabular-nums; text-align: center; margin: 16px 0 2px; }
   .hint { font-size: 12px; color: #9AA3B2; text-align: center; margin-bottom: 16px; }
+  .seg { display: flex; gap: 4px; background: #EDF0F4; border-radius: 12px; padding: 4px; margin-bottom: 14px; }
+  .seg button { flex: 1; background: transparent; color: #7A8494; font-weight: 600; font-size: 14px; padding: 9px 6px; border-radius: 9px; }
+  .seg button.active { background: #fff; color: #1B2330; box-shadow: 0 1px 2px rgba(16,24,40,.08); }
+  .drop { border: 1.5px dashed #C3CAD6; border-radius: 14px; background: #FBFCFD; padding: 22px 16px; text-align: center; }
+  .drop .big { font-size: 15px; font-weight: 600; color: #3D4554; }
+  .drop .sub { font-size: 12px; color: #9AA3B2; margin-top: 6px; line-height: 1.5; }
   .chipbox { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; border: 1px solid #D9DEE6; border-radius: 12px; background: #FBFCFD; padding: 7px; cursor: text; }
   .chipbox:focus-within { border-color: #4263EB; }
   .chip-tag { display: inline-flex; align-items: center; gap: 6px; background: #EAEEFC; color: #2A41A5; font-size: 13px; font-weight: 500; padding: 5px 6px 5px 11px; border-radius: 99px; }
@@ -52,7 +58,7 @@
   .hidden { display: none !important; }
   progress { width: 100%; margin-top: 10px; }
   .divider { border-top: 1px solid #EDF0F4; margin: 16px 0 2px; }
-  input[type=file] { font-size: 13px; color: #7A8494; margin-top: 6px; }
+  input[type=file] { font-size: 13px; color: #7A8494; margin-top: 12px; }
 </style>
 </head>
 <body>
@@ -74,18 +80,40 @@
 
   <!-- Recorder -->
   <div class="card hidden" id="recorder">
-    <div class="hidden" id="calWrap">
-      <label style="margin-top:0">Calendar event (auto-fills title &amp; attendees)</label>
-      <select id="calEvent" onchange="calChanged()"><option value="">&mdash; not linked &mdash;</option></select>
-    </div>
-    <div class="timer" id="timer">00:00</div>
-    <div class="hint" id="recHint">Keep this page open while recording</div>
-    <button class="btn-rec" id="recBtn" onclick="toggleRecord()">&#9679;&nbsp; Start recording</button>
-    <div class="row hidden" id="recControls">
-      <button class="btn-stop" onclick="toggleRecord()">&#9632;&nbsp; Stop</button>
-      <button class="btn-pause" id="pauseBtn" onclick="togglePause()">Pause</button>
+
+    <!-- Mode toggle -->
+    <div class="seg">
+      <button id="segRecord" class="active" onclick="setMode('record')">&#9679;&nbsp; Record</button>
+      <button id="segUpload" onclick="setMode('upload')">&#8682;&nbsp; Voice Memo</button>
     </div>
 
+    <!-- Tag to a meeting (shared by both modes) -->
+    <div class="hidden" id="calWrap">
+      <label style="margin-top:0">Tag to a meeting (auto-fills title &amp; attendees)</label>
+      <select id="calEvent" onchange="calChanged()"><option value="">&mdash; not linked &mdash;</option></select>
+    </div>
+
+    <!-- Record mode -->
+    <div id="recordMode">
+      <div class="timer" id="timer">00:00</div>
+      <div class="hint" id="recHint">Keep this page open while recording</div>
+      <button class="btn-rec" id="recBtn" onclick="toggleRecord()">&#9679;&nbsp; Start recording</button>
+      <div class="row hidden" id="recControls">
+        <button class="btn-stop" onclick="toggleRecord()">&#9632;&nbsp; Stop</button>
+        <button class="btn-pause" id="pauseBtn" onclick="togglePause()">Pause</button>
+      </div>
+    </div>
+
+    <!-- Upload (Voice Memo) mode -->
+    <div id="uploadMode" class="hidden">
+      <div class="drop">
+        <div class="big">Add a Voice Memos recording</div>
+        <div class="sub">In Voice Memos: open a recording &rarr; <b>&middot;&middot;&middot;</b> &rarr; Share &rarr; Save to Files. Then pick it here. Any audio file works too.</div>
+        <input type="file" id="filePick" accept="audio/*,video/mp4,.m4a,.mp3,.wav,.webm" onchange="pickFile()">
+      </div>
+    </div>
+
+    <!-- Shared details + upload -->
     <div id="uploadForm" class="hidden">
       <div class="divider"></div>
       <label>Meeting title</label>
@@ -101,8 +129,6 @@
     </div>
 
     <div id="status"></div>
-    <label>&hellip;or upload an existing audio file (e.g. a Zoom/QuickTime recording)</label>
-    <input type="file" id="filePick" accept="audio/*,video/mp4,.m4a,.mp3,.wav,.webm" onchange="pickFile()">
   </div>
 
   <!-- Jobs -->
@@ -119,6 +145,7 @@
 let mediaRecorder = null, chunks = [], startTs = 0, pausedMs = 0, pauseStart = 0, timerInt = null, wakeLock = null;
 let recordedBlob = null, recordedAt = null, pickedFile = null;
 let calEvents = [], attendees = [];
+let mode = "record";
 
 const $ = id => document.getElementById(id);
 const secret = () => localStorage.getItem("app_secret") || "";
@@ -132,6 +159,31 @@ function saveSecret() {
   if (!v) return;
   localStorage.setItem("app_secret", v);
   init();
+}
+
+// Switch between in-app Record and Voice Memos Upload.
+function setMode(m) {
+  if (m === mode) return;
+  // Don't allow leaving Record while a recording is in progress.
+  if (mediaRecorder && mediaRecorder.state !== "inactive") {
+    setStatus("Stop the current recording before switching.");
+    return;
+  }
+  // Warn before throwing away an unsent capture.
+  if ((recordedBlob || pickedFile) &&
+      !confirm("You have a recording that hasn't been uploaded yet. Switching tabs will discard it. Continue?")) {
+    return;
+  }
+  mode = m;
+  recordedBlob = null; pickedFile = null;
+  $("filePick").value = "";
+  $("uploadForm").classList.add("hidden");
+  $("timer").textContent = "00:00";
+  setStatus("");
+  $("segRecord").classList.toggle("active", m === "record");
+  $("segUpload").classList.toggle("active", m === "upload");
+  $("recordMode").classList.toggle("hidden", m !== "record");
+  $("uploadMode").classList.toggle("hidden", m !== "upload");
 }
 
 async function loadCalendar() {
@@ -297,10 +349,16 @@ function pickFile() {
   if (!f) return;
   pickedFile = f; recordedBlob = null;
   recordedAt = new Date(f.lastModified || Date.now()).toISOString();
-  $("title").value = f.name.replace(/\.[^.]+$/, "");
-  renderChips();
+  // If a meeting is already tagged, keep its title/attendees; otherwise seed
+  // the title from the filename so it can be tagged or edited before upload.
+  if ($("calEvent")?.value !== "" && calEvents.length) {
+    calChanged();
+  } else {
+    $("title").value = f.name.replace(/\.[^.]+$/, "");
+    renderChips();
+  }
   $("uploadForm").classList.remove("hidden");
-  setStatus("File ready (" + (f.size / 1048576).toFixed(1) + " MB). Add details and upload.");
+  setStatus("File ready (" + (f.size / 1048576).toFixed(1) + " MB). Tag it to a meeting and upload.");
 }
 
 function tick() {
